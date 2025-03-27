@@ -292,6 +292,23 @@ module ShapeUpDownloader
           existing_ids.add(clean_id)
         end
 
+        # Add IDs to all paragraphs that don't have them
+        doc.css("p").each do |para|
+          next if para["id"]
+          # Create an ID based on the first few words of the paragraph
+          words = para.text.strip.split(/\s+/)[0..4].join(' ').downcase
+          clean_id = "p-#{words}".gsub(/[^a-zA-Z0-9]+/, '-')
+          # Ensure uniqueness
+          base_id = clean_id
+          counter = 1
+          while existing_ids.include?(clean_id)
+            clean_id = "#{base_id}-#{counter}"
+            counter += 1
+          end
+          para["id"] = clean_id
+          existing_ids.add(clean_id)
+        end
+
         # Process internal links
         doc.css("a[href]").each do |link|
           href = link["href"]
@@ -317,23 +334,107 @@ module ShapeUpDownloader
               target = doc.at_css("[id='#{clean_fragment}']")
               unless target
                 # Look for text that matches the original fragment
-                text_nodes = doc.xpath(".//text()").select { |n| n.text.include?(fragment) }
+                text_nodes = doc.xpath(".//text()").select do |n| 
+                  # Skip text nodes that are part of a link
+                  next false if n.ancestors("a").any?
+                  
+                  # Normalize text for comparison
+                  node_text = n.text.strip.downcase
+                  fragment_text = fragment.strip.downcase
+                  
+                  # Try exact match first
+                  next true if node_text == fragment_text
+                  
+                  # Then try substring match
+                  next true if node_text.include?(fragment_text)
+                  
+                  # Try matching first few words
+                  node_words = node_text.split(/\s+/)[0..4].join(' ')
+                  fragment_words = fragment_text.split(/\s+/)[0..4].join(' ')
+                  next true if node_words == fragment_words
+                  
+                  # Finally try fuzzy match
+                  next true if node_text.gsub(/[^a-zA-Z0-9]+/, '') == fragment_text.gsub(/[^a-zA-Z0-9]+/, '')
+                  
+                  false
+                end
+
                 if text_node = text_nodes.first
-                  # Create a span around the text
-                  span = Nokogiri::XML::Node.new("span", doc)
-                  span["id"] = clean_fragment
-                  text_node.wrap(span)
-                  existing_ids.add(clean_fragment)
+                  # Find the closest block-level ancestor
+                  ancestor = text_node.ancestors("p, div, section, article, h1, h2, h3, h4, h5, h6").first
+                  
+                  if ancestor
+                    # If ancestor already has an ID, use it
+                    if ancestor["id"]
+                      link["href"] = "##{ancestor['id']}"
+                      next
+                    end
+                    
+                    # Otherwise, create a new ID
+                    clean_id = clean_fragment
+                    base_id = clean_id
+                    counter = 1
+                    while existing_ids.include?(clean_id)
+                      clean_id = "#{base_id}-#{counter}"
+                      counter += 1
+                    end
+                    ancestor["id"] = clean_id
+                    existing_ids.add(clean_id)
+                    link["href"] = "##{clean_id}"
+                  else
+                    # Create a span around the text if no suitable ancestor found
+                    span = Nokogiri::XML::Node.new("span", doc)
+                    span["id"] = clean_fragment
+                    text_node.wrap(span)
+                    existing_ids.add(clean_fragment)
+                    link["href"] = "##{clean_fragment}"
+                  end
                 else
                   # If we can't find matching text, try to find a nearby heading or paragraph
-                  nearest = doc.at_css("h1, h2, h3, h4, h5, h6, p").tap do |elem|
-                    next unless elem
-                    elem["id"] = clean_fragment unless elem["id"]
-                    existing_ids.add(clean_fragment)
+                  parent = link.ancestors("section, article, div").first || doc
+                  
+                  # First try to find a heading with similar text
+                  headings = parent.css("h1, h2, h3, h4, h5, h6").select do |h|
+                    heading_text = h.text.strip.downcase
+                    fragment_text = fragment.strip.downcase
+                    heading_text.include?(fragment_text) || fragment_text.include?(heading_text)
+                  end
+                  
+                  if heading = headings.first
+                    unless heading["id"]
+                      clean_id = heading.text.strip.downcase.gsub(/[^a-zA-Z0-9]+/, '-')
+                      clean_id = "heading-#{clean_id}" unless clean_id.match?(/^[a-zA-Z]/)
+                      base_id = clean_id
+                      counter = 1
+                      while existing_ids.include?(clean_id)
+                        clean_id = "#{base_id}-#{counter}"
+                        counter += 1
+                      end
+                      heading["id"] = clean_id
+                      existing_ids.add(clean_id)
+                    end
+                    link["href"] = "##{heading['id']}"
+                  else
+                    # If no suitable heading found, create an anchor at the nearest paragraph
+                    nearest = parent.at_css("p")
+                    if nearest
+                      unless nearest["id"]
+                        words = nearest.text.strip.split(/\s+/)[0..4].join(' ').downcase
+                        clean_id = "p-#{words}".gsub(/[^a-zA-Z0-9]+/, '-')
+                        base_id = clean_id
+                        counter = 1
+                        while existing_ids.include?(clean_id)
+                          clean_id = "#{base_id}-#{counter}"
+                          counter += 1
+                        end
+                        nearest["id"] = clean_id
+                        existing_ids.add(clean_id)
+                      end
+                      link["href"] = "##{nearest['id']}"
+                    end
                   end
                 end
               end
-              link["href"] = "##{clean_fragment}"
             end
           elsif href =~ /shapeup\/([0-9.]+(?:-(?:chapter|appendix)-\d+|conclusion))/
             # Convert shapeup/X.X-chapter-XX or shapeup/X.X-appendix-XX links
@@ -364,27 +465,111 @@ module ShapeUpDownloader
                 link["href"] = "##{clean_fragment}"
               end
             else
-              # Try to find or create a target for the fragment
+              # Try to find or create a target for the fragment using the same logic as above
               target = doc.at_css("[id='#{clean_fragment}']")
               unless target
                 # Look for text that matches the original fragment
-                text_nodes = doc.xpath(".//text()").select { |n| n.text.include?(fragment) }
+                text_nodes = doc.xpath(".//text()").select do |n| 
+                  # Skip text nodes that are part of a link
+                  next false if n.ancestors("a").any?
+                  
+                  # Normalize text for comparison
+                  node_text = n.text.strip.downcase
+                  fragment_text = fragment.strip.downcase
+                  
+                  # Try exact match first
+                  next true if node_text == fragment_text
+                  
+                  # Then try substring match
+                  next true if node_text.include?(fragment_text)
+                  
+                  # Try matching first few words
+                  node_words = node_text.split(/\s+/)[0..4].join(' ')
+                  fragment_words = fragment_text.split(/\s+/)[0..4].join(' ')
+                  next true if node_words == fragment_words
+                  
+                  # Finally try fuzzy match
+                  next true if node_text.gsub(/[^a-zA-Z0-9]+/, '') == fragment_text.gsub(/[^a-zA-Z0-9]+/, '')
+                  
+                  false
+                end
+
                 if text_node = text_nodes.first
-                  # Create a span around the text
-                  span = Nokogiri::XML::Node.new("span", doc)
-                  span["id"] = clean_fragment
-                  text_node.wrap(span)
-                  existing_ids.add(clean_fragment)
+                  # Find the closest block-level ancestor
+                  ancestor = text_node.ancestors("p, div, section, article, h1, h2, h3, h4, h5, h6").first
+                  
+                  if ancestor
+                    # If ancestor already has an ID, use it
+                    if ancestor["id"]
+                      link["href"] = "##{ancestor['id']}"
+                      next
+                    end
+                    
+                    # Otherwise, create a new ID
+                    clean_id = clean_fragment
+                    base_id = clean_id
+                    counter = 1
+                    while existing_ids.include?(clean_id)
+                      clean_id = "#{base_id}-#{counter}"
+                      counter += 1
+                    end
+                    ancestor["id"] = clean_id
+                    existing_ids.add(clean_id)
+                    link["href"] = "##{clean_id}"
+                  else
+                    # Create a span around the text if no suitable ancestor found
+                    span = Nokogiri::XML::Node.new("span", doc)
+                    span["id"] = clean_fragment
+                    text_node.wrap(span)
+                    existing_ids.add(clean_fragment)
+                    link["href"] = "##{clean_fragment}"
+                  end
                 else
                   # If we can't find matching text, try to find a nearby heading or paragraph
-                  nearest = doc.at_css("h1, h2, h3, h4, h5, h6, p").tap do |elem|
-                    next unless elem
-                    elem["id"] = clean_fragment unless elem["id"]
-                    existing_ids.add(clean_fragment)
+                  parent = link.ancestors("section, article, div").first || doc
+                  
+                  # First try to find a heading with similar text
+                  headings = parent.css("h1, h2, h3, h4, h5, h6").select do |h|
+                    heading_text = h.text.strip.downcase
+                    fragment_text = fragment.strip.downcase
+                    heading_text.include?(fragment_text) || fragment_text.include?(heading_text)
+                  end
+                  
+                  if heading = headings.first
+                    unless heading["id"]
+                      clean_id = heading.text.strip.downcase.gsub(/[^a-zA-Z0-9]+/, '-')
+                      clean_id = "heading-#{clean_id}" unless clean_id.match?(/^[a-zA-Z]/)
+                      base_id = clean_id
+                      counter = 1
+                      while existing_ids.include?(clean_id)
+                        clean_id = "#{base_id}-#{counter}"
+                        counter += 1
+                      end
+                      heading["id"] = clean_id
+                      existing_ids.add(clean_id)
+                    end
+                    link["href"] = "##{heading['id']}"
+                  else
+                    # If no suitable heading found, create an anchor at the nearest paragraph
+                    nearest = parent.at_css("p")
+                    if nearest
+                      unless nearest["id"]
+                        words = nearest.text.strip.split(/\s+/)[0..4].join(' ').downcase
+                        clean_id = "p-#{words}".gsub(/[^a-zA-Z0-9]+/, '-')
+                        base_id = clean_id
+                        counter = 1
+                        while existing_ids.include?(clean_id)
+                          clean_id = "#{base_id}-#{counter}"
+                          counter += 1
+                        end
+                        nearest["id"] = clean_id
+                        existing_ids.add(clean_id)
+                      end
+                      link["href"] = "##{nearest['id']}"
+                    end
                   end
                 end
               end
-              link["href"] = "##{clean_fragment}"
             end
           end
         end
