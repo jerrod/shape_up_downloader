@@ -54,16 +54,8 @@ module ShapeUpDownloader
       # Add style.css
       Utils::EPUBGenerator.add_style(book)
 
-      # Add table of contents
+      # Add table of contents and process chapters
       Utils::EPUBGenerator.add_table_of_contents(book, doc)
-
-      # Track processed images to avoid duplicates
-      processed_images = {}
-
-      # Process each chapter
-      doc.css(".chapter").each_with_index do |chapter, index|
-        Utils::EPUBGenerator.add_chapter(book, chapter, index, processed_images)
-      end
 
       # Generate the EPUB file
       book.generate_epub(output_file)

@@ -172,13 +172,8 @@ module ShapeUpDownloader
             img_url = "#{BASE_URL}#{img["src"]}"
             img["src"] = img_url
           end
-          # Remove any remote images that might cause EPUB validation issues
-          if img["src"].start_with?("http")
-            img.remove
-          end
         rescue => e
           puts "Warning: Failed to process image #{img["src"]}: #{e.message}"
-          img.remove
         end
       end
 
