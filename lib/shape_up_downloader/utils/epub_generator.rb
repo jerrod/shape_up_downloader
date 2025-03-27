@@ -328,6 +328,11 @@ module ShapeUpDownloader
           existing_ids.add(clean_id)
         end
 
+        # Helper method to normalize text for comparison
+        def self.normalize_text(text)
+          text.strip.gsub(/\s+/, ' ').downcase
+        end
+
         # Process internal links
         doc.css("a[href]").each do |link|
           href = link["href"]
@@ -352,28 +357,30 @@ module ShapeUpDownloader
               # Try to find or create a target for the fragment
               target = doc.at_css("[id='#{clean_fragment}']")
               unless target
+                # Normalize the fragment text
+                normalized_fragment = normalize_text(fragment)
+                
                 # Look for text that matches the original fragment
                 text_nodes = doc.xpath(".//text()").select do |n| 
                   # Skip text nodes that are part of a link
                   next false if n.ancestors("a").any?
                   
                   # Normalize text for comparison
-                  node_text = n.text.strip.downcase
-                  fragment_text = fragment.strip.downcase
+                  normalized_node_text = normalize_text(n.text)
                   
                   # Try exact match first
-                  next true if node_text == fragment_text
+                  next true if normalized_node_text == normalized_fragment
                   
                   # Then try substring match
-                  next true if node_text.include?(fragment_text)
+                  next true if normalized_node_text.include?(normalized_fragment)
                   
                   # Try matching first few words
-                  node_words = node_text.split(/\s+/)[0..4].join(' ')
-                  fragment_words = fragment_text.split(/\s+/)[0..4].join(' ')
+                  node_words = normalized_node_text.split(' ')[0..4].join(' ')
+                  fragment_words = normalized_fragment.split(' ')[0..4].join(' ')
                   next true if node_words == fragment_words
                   
                   # Finally try fuzzy match
-                  next true if node_text.gsub(/[^a-zA-Z0-9]+/, '') == fragment_text.gsub(/[^a-zA-Z0-9]+/, '')
+                  next true if normalized_node_text.gsub(/[^a-zA-Z0-9]/, '') == normalized_fragment.gsub(/[^a-zA-Z0-9]/, '')
                   
                   false
                 end
@@ -413,10 +420,10 @@ module ShapeUpDownloader
                   parent = link.ancestors("section, article, div").first || doc
                   
                   # First try to find a heading with similar text
+                  normalized_fragment = normalize_text(fragment)
                   headings = parent.css("h1, h2, h3, h4, h5, h6").select do |h|
-                    heading_text = h.text.strip.downcase
-                    fragment_text = fragment.strip.downcase
-                    heading_text.include?(fragment_text) || fragment_text.include?(heading_text)
+                    normalized_heading = normalize_text(h.text)
+                    normalized_heading.include?(normalized_fragment) || normalized_fragment.include?(normalized_heading)
                   end
                   
                   if heading = headings.first
@@ -438,7 +445,7 @@ module ShapeUpDownloader
                     nearest = parent.at_css("p")
                     if nearest
                       unless nearest["id"]
-                        words = nearest.text.strip.split(/\s+/)[0..4].join(' ').downcase
+                        words = normalize_text(nearest.text).split(' ')[0..4].join(' ')
                         clean_id = "p-#{words}".gsub(/[^a-zA-Z0-9]+/, '-')
                         base_id = clean_id
                         counter = 1
@@ -487,28 +494,30 @@ module ShapeUpDownloader
               # Try to find or create a target for the fragment using the same logic as above
               target = doc.at_css("[id='#{clean_fragment}']")
               unless target
+                # Normalize the fragment text
+                normalized_fragment = normalize_text(fragment)
+                
                 # Look for text that matches the original fragment
                 text_nodes = doc.xpath(".//text()").select do |n| 
                   # Skip text nodes that are part of a link
                   next false if n.ancestors("a").any?
                   
                   # Normalize text for comparison
-                  node_text = n.text.strip.downcase
-                  fragment_text = fragment.strip.downcase
+                  normalized_node_text = normalize_text(n.text)
                   
                   # Try exact match first
-                  next true if node_text == fragment_text
+                  next true if normalized_node_text == normalized_fragment
                   
                   # Then try substring match
-                  next true if node_text.include?(fragment_text)
+                  next true if normalized_node_text.include?(normalized_fragment)
                   
                   # Try matching first few words
-                  node_words = node_text.split(/\s+/)[0..4].join(' ')
-                  fragment_words = fragment_text.split(/\s+/)[0..4].join(' ')
+                  node_words = normalized_node_text.split(' ')[0..4].join(' ')
+                  fragment_words = normalized_fragment.split(' ')[0..4].join(' ')
                   next true if node_words == fragment_words
                   
                   # Finally try fuzzy match
-                  next true if node_text.gsub(/[^a-zA-Z0-9]+/, '') == fragment_text.gsub(/[^a-zA-Z0-9]+/, '')
+                  next true if normalized_node_text.gsub(/[^a-zA-Z0-9]/, '') == normalized_fragment.gsub(/[^a-zA-Z0-9]/, '')
                   
                   false
                 end
@@ -548,10 +557,10 @@ module ShapeUpDownloader
                   parent = link.ancestors("section, article, div").first || doc
                   
                   # First try to find a heading with similar text
+                  normalized_fragment = normalize_text(fragment)
                   headings = parent.css("h1, h2, h3, h4, h5, h6").select do |h|
-                    heading_text = h.text.strip.downcase
-                    fragment_text = fragment.strip.downcase
-                    heading_text.include?(fragment_text) || fragment_text.include?(heading_text)
+                    normalized_heading = normalize_text(h.text)
+                    normalized_heading.include?(normalized_fragment) || normalized_fragment.include?(normalized_heading)
                   end
                   
                   if heading = headings.first
@@ -573,7 +582,7 @@ module ShapeUpDownloader
                     nearest = parent.at_css("p")
                     if nearest
                       unless nearest["id"]
-                        words = nearest.text.strip.split(/\s+/)[0..4].join(' ').downcase
+                        words = normalize_text(nearest.text).split(' ')[0..4].join(' ')
                         clean_id = "p-#{words}".gsub(/[^a-zA-Z0-9]+/, '-')
                         base_id = clean_id
                         counter = 1
