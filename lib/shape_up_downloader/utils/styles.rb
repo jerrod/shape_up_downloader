@@ -21,15 +21,46 @@ module ShapeUpDownloader
           line-height: 1.2;
         }
 
-        /* Subheadings */
-        h2 {
-          font-size: 2em;
-          margin: 1.5em 0 0.5em;
+        /* Chapter titles (h2) */
+        h2.chapter-title {
+          font-size: 2.2em;
+          font-weight: 700;
+          margin: 1.5em 0 1em;
+          line-height: 1.2;
+          text-align: left;
+          color: #000;
         }
 
-        h3 {
+        /* Regular h2 (not chapter titles) */
+        h2:not(.chapter-title) {
           font-size: 1.5em;
+          font-weight: 600;
           margin: 1.5em 0 0.5em;
+          line-height: 1.3;
+        }
+
+        /* Subheadings within chapters */
+        h3 {
+          font-size: 1.65em; /* 75% of chapter title size (2.2em) */
+          font-weight: 600;
+          margin: 1.2em 0 0.5em;
+          line-height: 1.3;
+          color: #333;
+        }
+
+        /* Smaller headings */
+        h4 {
+          font-size: 1.4em;
+          font-weight: 600;
+          margin: 1.2em 0 0.5em;
+          line-height: 1.3;
+        }
+
+        h5, h6 {
+          font-size: 1.2em;
+          font-weight: 600;
+          margin: 1em 0 0.5em;
+          line-height: 1.3;
         }
 
         /* Images */
@@ -77,8 +108,8 @@ module ShapeUpDownloader
         }
 
         .table-of-contents h2 {
-          font-size: 2em;
-          margin-bottom: 1em;
+          font-size: 1.3em;
+          margin-bottom: 0.5em;
         }
 
         .table-of-contents ul {
@@ -87,7 +118,7 @@ module ShapeUpDownloader
         }
 
         .table-of-contents li {
-          margin: 0.5em 0;
+          margin: 0.15em 0;
         }
 
         /* Cover page */
