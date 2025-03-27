@@ -85,12 +85,32 @@ module ShapeUpDownloader
         # Clean up the chapter structure
         chapter.css('nav, .navigation, .menu, .nav, [class*="menu"], [class*="nav"], .hamburger, .hamburger-menu, header, .header').remove
 
-        chapter_title = if (title_elem = chapter.at_css(".chapter-title"))
+        # Get chapter ID from the div.chapter element
+        chapter_id = chapter['id']
+
+        # Determine chapter type and title
+        chapter_title = if (title_elem = chapter.at_css(".chapter-title, h1.title"))
           title_elem.name = "h1"
           title_elem.remove_attribute("class")
           title_elem.text.strip
         else
-          "Chapter #{index + 1}"
+          # Default title based on chapter type and ID pattern
+          case chapter_id
+          when /4\.0-appendix-01/
+            "How to Implement Shape Up in Basecamp"
+          when /4\.1-appendix-02/
+            "Adjust to Your Size"
+          when /4\.2-appendix-03/
+            "How to Begin to Shape Up"
+          when /4\.5-appendix-06/
+            "Glossary"
+          when /4\.6-appendix-07/
+            "About the Author"
+          when /conclusion/
+            "Conclusion"
+          else
+            "Chapter #{index + 1}"
+          end
         end
 
         # Process chapter heading
@@ -100,6 +120,28 @@ module ShapeUpDownloader
           # Remove any existing links in the heading
           if (link = heading.at_css("a"))
             link.replace(link.text)
+          end
+        end
+
+        # Special handling for appendix, glossary, and about sections
+        if chapter_id&.match?(/appendix|glossary|about/)
+          # Remove any navigation or menu elements specific to these sections
+          chapter.css('.appendix-nav, .glossary-nav, .about-nav').remove
+          
+          # For glossary, ensure terms are properly formatted
+          if chapter_id&.include?('glossary')
+            chapter.css('.term').each do |term|
+              term.name = 'dt'
+              term.next_element.name = 'dd' if term.next_element
+            end
+          end
+          
+          # For about section, ensure proper formatting of author info
+          if chapter_id&.include?('about')
+            if (bio = chapter.at_css('.author-bio'))
+              bio.name = 'div'
+              bio['class'] = 'author-biography'
+            end
           end
         end
 
@@ -152,10 +194,17 @@ module ShapeUpDownloader
           if href
             if href.start_with?("/shapeup/")
               # Convert absolute paths to relative chapter links
-              if href.include?("appendix")
-                # Handle appendix links
-                href.match(/\d+\.\d+/)&.to_s&.tr(".", "_") || "01"
-                link["href"] = "chapter_16.xhtml"  # Appendix is the last chapter
+              case href
+              when /4\.0-appendix-01/
+                link["href"] = "chapter_#{index + 1}.xhtml"
+              when /4\.1-appendix-02/
+                link["href"] = "chapter_#{index + 1}.xhtml"
+              when /4\.2-appendix-03/
+                link["href"] = "chapter_#{index + 1}.xhtml"
+              when /4\.5-appendix-06/
+                link["href"] = "chapter_#{index + 1}.xhtml"
+              when /4\.6-appendix-07/
+                link["href"] = "chapter_#{index + 1}.xhtml"
               else
                 chapter_num = href.match(/\d+\.\d+/)&.to_s&.tr(".", "_") || "01"
                 link["href"] = "chapter_#{format("%02d", chapter_num.to_i)}.xhtml"
@@ -183,6 +232,9 @@ module ShapeUpDownloader
               else
                 link["href"] = base_href
               end
+            elsif href == "/"
+              # Replace root URLs with chapter 1
+              link["href"] = "chapter_01.xhtml"
             end
           end
         end

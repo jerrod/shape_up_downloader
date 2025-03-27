@@ -116,7 +116,51 @@ module ShapeUpDownloader
         end
       end
 
-      urls.sort
+      # Add appendices, glossary, and about sections if they're not already included
+      additional_sections = [
+        "#{BASE_URL}/shapeup/4.0-appendix-01",
+        "#{BASE_URL}/shapeup/4.1-appendix-02",
+        "#{BASE_URL}/shapeup/4.2-appendix-03",
+        "#{BASE_URL}/shapeup/4.5-appendix-06",
+        "#{BASE_URL}/shapeup/4.6-appendix-07"
+      ]
+
+      additional_sections.each do |url|
+        next if seen_urls.include?(url)
+        seen_urls.add(url)
+        urls << url
+      end
+
+      # Sort URLs to ensure proper order:
+      # 1. Main chapters (numbered)
+      # 2. Conclusion
+      # 3. Appendices (in order)
+      # 4. Glossary
+      # 5. About
+      urls.sort_by do |url|
+        if url.include?("4.0-appendix-01")
+          [2, 1]  # First appendix
+        elsif url.include?("4.1-appendix-02")
+          [2, 2]  # Second appendix
+        elsif url.include?("4.2-appendix-03")
+          [2, 3]  # Third appendix
+        elsif url.include?("4.5-appendix-06")
+          [2, 4]  # Fourth appendix
+        elsif url.include?("4.6-appendix-07")
+          [2, 5]  # Fifth appendix
+        elsif url.include?("-conclusion")
+          [1, 0]  # First priority after chapters
+        else
+          # Extract chapter number for proper sorting
+          # Put regular chapters first (priority 0)
+          numbers = url.match(/(\d+)\.(\d+)/)
+          if numbers
+            [0, numbers[1].to_i, numbers[2].to_i]
+          else
+            [5, 0]  # Unknown format goes last
+          end
+        end
+      end
     end
 
     def modify_content(document, urls)
@@ -128,22 +172,36 @@ module ShapeUpDownloader
             img_url = "#{BASE_URL}#{img["src"]}"
             img["src"] = img_url
           end
+          # Remove any remote images that might cause EPUB validation issues
+          if img["src"].start_with?("http")
+            img.remove
+          end
         rescue => e
           puts "Warning: Failed to process image #{img["src"]}: #{e.message}"
+          img.remove
         end
       end
 
       # Update internal links
       document.css("a").each do |link|
         href = link["href"]
-        next unless href&.match?(CHAPTER_PATTERN)
+        next unless href
 
-        # Extract the base chapter ID and any hash fragment
-        base_url = href.split("#").first.split("?").first
-        hash = href.include?("#") ? "#" + href.split("#").last : ""
-        chapter_id = base_url.split("/").last + hash
+        # Remove problematic links in appendix, glossary, and about sections
+        if href == "/" && (document.at_css("[class*='appendix']") || document.at_css("[class*='glossary']") || document.at_css("[class*='about']"))
+          link.replace(link.text)
+          next
+        end
 
-        link["href"] = "##{chapter_id}"
+        # Handle chapter links
+        if href.match?(CHAPTER_PATTERN)
+          # Extract the base chapter ID and any hash fragment
+          base_url = href.split("#").first.split("?").first
+          hash = href.include?("#") ? "#" + href.split("#").last : ""
+          chapter_id = base_url.split("/").last + hash
+
+          link["href"] = "##{chapter_id}"
+        end
       end
 
       document

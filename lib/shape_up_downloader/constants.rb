@@ -3,7 +3,8 @@
 module ShapeUpDownloader
   module Constants
     VERSION = "0.1.0"
-    CHAPTER_PATTERN = %r{/shapeup/\d+\.\d+(?:-chapter-\d+|-conclusion)}
+    # Updated pattern to match all content types including chapters, appendices, glossary, and about
+    CHAPTER_PATTERN = %r{/shapeup/(?:\d+\.\d+(?:-chapter-\d+|-conclusion)|appendix|glossary|about)}
     STYLE_CSS = Utils::Styles::STYLE_CSS
 
     # URLs and domains

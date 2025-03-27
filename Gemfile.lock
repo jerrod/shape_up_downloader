@@ -4,7 +4,7 @@ PATH
     shape_up_downloader (0.1.0)
       activesupport (~> 7.1)
       epubcheck-ruby
-      gepub (~> 1.0)
+      gepub
       http (~> 5.1)
       nokogiri (~> 1.15)
       progress_bar (~> 1.3)
