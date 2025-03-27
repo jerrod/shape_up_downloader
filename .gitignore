@@ -1,0 +1,6 @@
+dist
+.cache
+**/shape-up.*
+**/.DS_Store
+.cursor*
+.rspec_status

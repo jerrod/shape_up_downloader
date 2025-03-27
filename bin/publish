@@ -1,0 +1,14 @@
+#!/usr/bin/env zsh
+
+# Source the user's zsh profile
+source ~/.zshrc
+
+# Change to the script's directory
+cd "$(dirname "$0")/.."
+
+# Run the commands
+bundle exec ruby bin/shape_up_downloader download_single_html
+bundle exec ruby bin/shape_up_downloader convert_to_epub
+bundle exec ruby bin/shape_up_downloader validate_epub
+
+open ./dist/shape_up.epub
