@@ -229,6 +229,11 @@ module ShapeUpDownloader
         chapter = chapter.dup # Create a copy to avoid modifying the original
         chapter.css('nav, .navigation, .menu, .nav, [class*="menu"], [class*="nav"], .hamburger, .hamburger-menu, header, .header').remove
 
+        # Remove all existing IDs from the chapter content to prevent duplicates
+        chapter.css("[id]").each do |elem|
+          elem.remove_attribute("id")
+        end
+
         # Process chapter heading
         if (heading = chapter.at_css("h1"))
           heading_id = "chapter_#{chapter_num}_heading"
@@ -266,19 +271,12 @@ module ShapeUpDownloader
           end
         end
 
-        # Preserve section IDs and create new ones for headings
-        chapter.css("section[id], h1, h2, h3, h4, h5, h6").each do |elem|
-          # Generate an ID based on the text content if none exists
-          if !elem["id"]
-            text = elem.text.strip
-            id = text.downcase.gsub(/[^a-z0-9]+/, '-')
-            elem["id"] = id unless id.empty?
-          end
-
-          # Clean up any existing IDs to ensure they're valid
-          if elem["id"]
-            elem["id"] = elem["id"].gsub('#', '-').gsub(/[^a-z0-9\-_]+/, '-')
-          end
+        # Create new IDs for headings and sections
+        chapter.css("section, h1, h2, h3, h4, h5, h6").each do |elem|
+          # Generate an ID based on the text content
+          text = elem.text.strip
+          id = text.downcase.gsub(/[^a-z0-9]+/, '-')
+          elem["id"] = id unless id.empty?
         end
 
         # Fix HTML issues
