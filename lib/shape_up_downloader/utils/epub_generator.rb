@@ -150,103 +150,159 @@ module ShapeUpDownloader
           src = img["src"]
           next unless src
 
-          if processed_images[src]
-            img["src"] = "../images/#{processed_images[src]}"
-          else
-            begin
-              uri = URI.parse(src)
-              response = Net::HTTP.get_response(uri)
+          begin
+            uri = URI.parse(src)
+            response = Net::HTTP.get_response(uri)
 
-              if response.is_a?(Net::HTTPSuccess)
-                image_data = response.body
-                content_type = response["Content-Type"]
+            if response.is_a?(Net::HTTPSuccess)
+              image_data = response.body
+              content_type = response["Content-Type"]
 
-                # Determine extension from content type or URL
-                extension = case content_type
-                when "image/jpeg", "image/jpg" then "jpg"
-                when "image/png" then "png"
-                when "image/gif" then "gif"
-                else File.extname(uri.path)[1..] || "jpg"
-                end
-
-                new_filename = "image_#{processed_images.size + 1}.#{extension}"
-                processed_images[src] = new_filename
-
-                # Add image to EPUB with correct media type
-                image_item = book.add_item("images/#{new_filename}")
-                image_item.content = image_data
-                image_item.media_type = content_type
-
-                img["src"] = "../images/#{new_filename}"
+              # Determine extension from content type or URL
+              extension = case content_type
+              when "image/jpeg", "image/jpg" then "jpg"
+              when "image/png" then "png"
+              when "image/gif" then "gif"
+              else File.extname(uri.path)[1..] || "jpg"
               end
-            rescue => e
-              puts "Warning: Failed to download image from #{src}: #{e.message}"
+
+              new_filename = "image_#{processed_images.size + 1}.#{extension}"
+              processed_images[src] = new_filename
+
+              # Add image to EPUB with correct media type
+              image_item = book.add_item("images/#{new_filename}")
+              image_item.content = image_data
+              image_item.media_type = content_type
+
+              # Update image source to use relative path
+              img["src"] = "../images/#{new_filename}"
+              img["alt"] ||= "Image #{new_filename}"
+
+              # If the image is inside a figure, update the figure's link as well
+              if img.parent.name == "figure" && img.parent.at_css("a")
+                img.parent.at_css("a")["href"] = "../images/#{new_filename}"
+              end
             end
+          rescue => e
+            puts "Warning: Failed to download image from #{src}: #{e.message}"
           end
 
-          # Convert to proper XHTML self-closing tag
+          # Ensure proper XHTML self-closing tag
           img.replace(img.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML))
         end
 
-        # Process internal links to fix multiple hash fragments and convert absolute paths to relative
+        # Process internal links
         chapter.css("a[href]").each do |link|
           href = link["href"]
-          if href
-            if href.start_with?("/shapeup/")
-              # Convert absolute paths to relative chapter links
-              case href
-              when /4\.0-appendix-01/
-                link["href"] = "chapter_#{index + 1}.xhtml"
-              when /4\.1-appendix-02/
-                link["href"] = "chapter_#{index + 1}.xhtml"
-              when /4\.2-appendix-03/
-                link["href"] = "chapter_#{index + 1}.xhtml"
-              when /4\.5-appendix-06/
-                link["href"] = "chapter_#{index + 1}.xhtml"
-              when /4\.6-appendix-07/
-                link["href"] = "chapter_#{index + 1}.xhtml"
-              else
-                chapter_num = href.match(/\d+\.\d+/)&.to_s&.tr(".", "_") || "01"
-                link["href"] = "chapter_#{format("%02d", chapter_num.to_i)}.xhtml"
-              end
-            elsif href.include?("#")
-              # Keep only the first hash fragment and ensure it exists
-              base_href = href.split("#").first
-              fragment = href.split("#")[1]
-              if fragment
-                # Create an anchor if it doesn't exist
-                target_id = "chapter_#{index + 1}_#{fragment}"
-                unless chapter.at_css("[id='#{target_id}']")
-                  # Find nearest heading or section
-                  nearest_node = link.ancestors("section, h1, h2, h3, h4, h5, h6").first
-                  if nearest_node
-                    nearest_node["id"] = target_id
-                  else
-                    # Create a span with the ID if no suitable container is found
-                    span = Nokogiri::XML::Node.new("span", chapter)
-                    span["id"] = target_id
-                    link.add_previous_sibling(span)
-                  end
+          next unless href
+
+          # Fix double hash fragments
+          if href.count("#") > 1
+            parts = href.split("#")
+            base = parts.first
+            fragments = parts[1..].join("-")
+            href = base + "#" + fragments
+            link["href"] = href
+          end
+
+          if href.start_with?("/shapeup/")
+            # Handle chapter references
+            if href =~ /(\d+\.\d+)-chapter-(\d+)(?:#(.+))?/
+              chapter_num = $2.to_i.to_s.rjust(2, "0")
+              fragment = $3
+              link["href"] = "chapter_#{chapter_num}.xhtml" + (fragment ? "##{fragment}" : "")
+            elsif href =~ /(\d+\.\d+)-appendix-(\d+)(?:#(.+))?/
+              chapter_num = (16 + $2.to_i).to_s.rjust(2, "0")
+              fragment = $3
+              link["href"] = "chapter_#{chapter_num}.xhtml" + (fragment ? "##{fragment}" : "")
+            elsif href =~ /conclusion(?:#(.+))?/
+              fragment = $1
+              link["href"] = "chapter_16.xhtml" + (fragment ? "##{fragment}" : "")
+            end
+          elsif href.start_with?("#")
+            # For same-page fragments, ensure the target exists
+            fragment_id = href[1..]
+            if fragment_id
+              # Try to find or create the target element
+              unless chapter.at_css("[id='#{fragment_id}']")
+                # Look for elements with matching text content
+                potential_targets = chapter.css("h1, h2, h3, h4, h5, h6, p, section").find_all do |elem|
+                  elem.text.strip.downcase.gsub(/[^\w]+/, "-") == fragment_id.gsub(/[^\w]+/, "-")
                 end
-                link["href"] = "#{base_href}##{target_id}"
-              else
-                link["href"] = base_href
+                
+                if potential_targets.any?
+                  # Use the first matching element
+                  potential_targets.first["id"] = fragment_id
+                else
+                  # Create a span with the ID near the link
+                  span = Nokogiri::XML::Node.new("span", chapter)
+                  span["id"] = fragment_id
+                  link.add_previous_sibling(span)
+                end
               end
-            elsif href == "/"
-              # Replace root URLs with chapter 1
-              link["href"] = "chapter_01.xhtml"
             end
           end
         end
 
-        # Add IDs to all headings and sections for internal links
-        chapter.css("h1, h2, h3, h4, h5, h6, section").each do |element|
-          if element["id"]
-            element["id"] = "chapter_#{index + 1}_#{element["id"]}"
+        # Special handling for appendix chapters
+        if chapter_id&.match?(/appendix/)
+          # Map common appendix references to their correct chapters and fragments
+          appendix_refs = {
+            "map-them-into-scopes" => ["12", "mapping-scopes"],
+            "mapping-the-scopes" => ["12", "mapping-scopes"],
+            "getting-one-piece-done" => ["11", "getting-one-piece"],
+            "show-progress" => ["13", "showing-progress"],
+            "showing-progress" => ["13", "showing-progress"],
+            "assign-projects-not-tasks" => ["10", "assign-projects-not-tasks"]
+          }
+
+          chapter.css("a[href]").each do |link|
+            href = link["href"]
+            if href&.start_with?("/shapeup/")
+              # Extract the target section/chapter
+              target = href.split("/").last
+              
+              # Check for mapped references first
+              if appendix_refs[target]
+                chapter_num, fragment = appendix_refs[target]
+                link["href"] = "chapter_#{chapter_num}.xhtml##{fragment}"
+              else
+                # Handle other chapter references
+                if target =~ /(\d+\.\d+)-chapter-(\d+)(?:#(.+))?/
+                  chapter_num = $2.to_i.to_s.rjust(2, "0")
+                  fragment = $3
+                  link["href"] = "chapter_#{chapter_num}.xhtml" + (fragment ? "##{fragment}" : "")
+                elsif target =~ /(\d+\.\d+)-appendix-(\d+)(?:#(.+))?/
+                  chapter_num = (16 + $2.to_i).to_s.rjust(2, "0")
+                  fragment = $3
+                  link["href"] = "chapter_#{chapter_num}.xhtml" + (fragment ? "##{fragment}" : "")
+                end
+              end
+            end
           end
         end
 
-        # Create chapter file
+        # Ensure all headings and sections have IDs
+        chapter.css("h1, h2, h3, h4, h5, h6, section").each do |elem|
+          unless elem["id"]
+            # Generate an ID based on text content
+            text_base = elem.text.strip.downcase.gsub(/[^\w]+/, "-")
+            elem["id"] = text_base
+          end
+        end
+
+        # Add IDs to common elements that might be referenced
+        ["case-study", "example", "figure", "table"].each do |type|
+          chapter.css(".#{type}").each do |elem|
+            unless elem["id"]
+              # Generate a simpler ID without random hex
+              text_base = elem.text.strip.downcase.gsub(/[^\w]+/, "-")
+              elem["id"] = "#{type}-#{text_base}"
+            end
+          end
+        end
+
+        # Create chapter file with proper XHTML structure
         chapter_num = format("%02d", index + 1)
         chapter_html = <<~HTML
           <?xml version="1.0" encoding="UTF-8"?>
@@ -257,7 +313,9 @@ module ShapeUpDownloader
             <link rel="stylesheet" type="text/css" href="../styles/style.css" />
           </head>
           <body>
-            #{chapter.to_xhtml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML)}
+            <div class="chapter-content">
+              #{chapter.to_xhtml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML)}
+            </div>
           </body>
           </html>
         HTML
