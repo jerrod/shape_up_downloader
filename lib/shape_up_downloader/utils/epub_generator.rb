@@ -151,7 +151,8 @@ module ShapeUpDownloader
           HTML
 
           # Add chapter to the book with cleaned ID
-          item = book.add_item("text/#{file_id}.xhtml", id: file_id.gsub(/[^a-zA-Z0-9_-]/, '-'))
+          clean_id = file_id.gsub(/[^a-zA-Z0-9_-]/, '-')
+          item = book.add_item("text/#{clean_id}.xhtml", id: clean_id)
           item.add_content(StringIO.new(chapter_html))
           item.add_property('svg')
           book.spine << item
