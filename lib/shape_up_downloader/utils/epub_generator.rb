@@ -58,15 +58,28 @@ module ShapeUpDownloader
         # Create an array of all chapters with their titles and process images
         processed_images = {}
         fragment_map = {}
+        chapter_id_map = {}
         
-        # First pass: collect all fragments from all chapters
+        # First pass: collect all fragments from all chapters and create chapter ID mapping
         doc.css(".chapter").each do |chapter|
           original_id = chapter['id']
+          
+          # Create a clean chapter ID for EPUB
+          clean_id = "chapter-#{original_id.gsub(/[^a-zA-Z0-9_-]/, '-')}"
+          chapter_id_map[original_id] = clean_id
+          
+          # Add chapter title to fragment map
+          if title_elem = chapter.at_css(".chapter-title")
+            title_id = title_elem.text.strip.downcase.gsub(/[^a-zA-Z0-9]+/, '-')
+            fragment_map[title_id] = original_id
+          end
+          
+          # Add all existing IDs to fragment map
           chapter.css("[id]").each do |elem|
             fragment_map[elem["id"]] = original_id
           end
           
-          # Add IDs to all headings
+          # Add IDs to all headings and add them to fragment map
           chapter.css("h1, h2, h3, h4, h5, h6").each do |heading|
             next if heading["id"]
             clean_id = heading.text.strip.downcase.gsub(/[^a-zA-Z0-9]+/, '-')
@@ -100,7 +113,13 @@ module ShapeUpDownloader
             when /4\.6-appendix-07/
               "Appendix 5: About the Author"
             else
-              "Chapter #{original_id}"
+              # Extract chapter number from the ID and ensure it starts from 1
+              chapter_num = original_id.match(/(\d+)\.\d+-(?:chapter|appendix)-(\d+)/)
+              if chapter_num
+                "Chapter #{chapter_num[2]}"
+              else
+                "Chapter #{original_id}"
+              end
             end
           end
 
@@ -142,11 +161,11 @@ module ShapeUpDownloader
 
         # Add chapters to the spine in order
         chapters.each do |file_id, title, chapter_content, original_id|
-          # Process chapter content
-          processed_chapter = process_chapter_content(chapter_content, original_id, fragment_map)
+          # Process chapter content with the chapter ID mapping
+          processed_chapter = process_chapter_content(chapter_content, original_id, fragment_map, chapter_id_map)
 
           # Create unique IDs for chapter elements
-          clean_id = "chapter-#{file_id}"
+          clean_id = chapter_id_map[original_id]
           content_id = "content-#{clean_id}"
           title_id = "title-#{clean_id}"
 
@@ -246,7 +265,7 @@ module ShapeUpDownloader
         doc.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML)
       end
 
-      def self.process_chapter_content(chapter, original_id, fragment_map)
+      def self.process_chapter_content(chapter, original_id, fragment_map, chapter_id_map)
         # Create a Nokogiri fragment from the input
         doc = if chapter.is_a?(String)
           Nokogiri::HTML.fragment(chapter)
@@ -323,7 +342,7 @@ module ShapeUpDownloader
             if target_chapter = fragment_map[fragment]
               if target_chapter != original_id
                 # Cross-chapter reference
-                clean_target = "chapter-#{target_chapter.gsub(/[^a-zA-Z0-9_-]/, '-')}"
+                clean_target = chapter_id_map[target_chapter]
                 link["href"] = "#{clean_target}.xhtml##{clean_fragment}"
               else
                 # Same chapter reference
@@ -439,13 +458,13 @@ module ShapeUpDownloader
           elsif href =~ /shapeup\/([0-9.]+(?:-(?:chapter|appendix)-\d+|conclusion))/
             # Convert shapeup/X.X-chapter-XX or shapeup/X.X-appendix-XX links
             target_id = $1
-            clean_id = "chapter-#{target_id.gsub(/[^a-zA-Z0-9_-]/, '-')}"
+            clean_id = chapter_id_map[target_id]
             link["href"] = "#{clean_id}.xhtml"
           elsif href =~ /([0-9.]+(?:-(?:chapter|appendix)-\d+|conclusion))(?:\.xhtml)?(?:#(.+))?/
             # Handle direct chapter/appendix links
             target_id = $1
             fragment = $2
-            clean_id = "chapter-#{target_id.gsub(/[^a-zA-Z0-9_-]/, '-')}"
+            clean_id = chapter_id_map[target_id]
             new_href = "#{clean_id}.xhtml"
             new_href += "##{fragment.gsub(/[^a-zA-Z0-9_-]/, '-')}" if fragment
             link["href"] = new_href
@@ -458,7 +477,7 @@ module ShapeUpDownloader
             if target_chapter = fragment_map[fragment]
               if target_chapter != original_id
                 # Cross-chapter reference
-                clean_target = "chapter-#{target_chapter.gsub(/[^a-zA-Z0-9_-]/, '-')}"
+                clean_target = chapter_id_map[target_chapter]
                 link["href"] = "#{clean_target}.xhtml##{clean_fragment}"
               else
                 # Same chapter reference
