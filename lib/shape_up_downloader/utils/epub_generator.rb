@@ -3,6 +3,7 @@
 require "net/http"
 require "nokogiri"
 require "fileutils"
+require "set"
 
 module ShapeUpDownloader
   module Utils
@@ -56,6 +57,26 @@ module ShapeUpDownloader
       def self.add_table_of_contents(book, doc)
         # Create an array of all chapters with their titles and process images
         processed_images = {}
+        fragment_map = {}
+        
+        # First pass: collect all fragments from all chapters
+        doc.css(".chapter").each do |chapter|
+          original_id = chapter['id']
+          chapter.css("[id]").each do |elem|
+            fragment_map[elem["id"]] = original_id
+          end
+          
+          # Add IDs to all headings
+          chapter.css("h1, h2, h3, h4, h5, h6").each do |heading|
+            next if heading["id"]
+            clean_id = heading.text.strip.downcase.gsub(/[^a-zA-Z0-9]+/, '-')
+            clean_id = "heading-#{clean_id}" unless clean_id.match?(/^[a-zA-Z]/)
+            heading["id"] = clean_id
+            fragment_map[clean_id] = original_id
+          end
+        end
+
+        # Create chapter array
         chapters = doc.css(".chapter").map do |chapter|
           # Extract the original ID and clean it for file naming
           original_id = chapter['id']
@@ -106,7 +127,7 @@ module ShapeUpDownloader
               <h1>Table of Contents</h1>
               <nav epub:type="toc" id="toc">
                 <ol>
-                  #{chapters.map { |id, title, _, _| "<li><a href='#{id}.xhtml'>#{title}</a></li>" }.join("\n")}
+                  #{chapters.map { |id, title, _, _| "<li><a href='chapter-#{id}.xhtml'>#{title}</a></li>" }.join("\n")}
                 </ol>
               </nav>
             </div>
@@ -122,12 +143,12 @@ module ShapeUpDownloader
         # Add chapters to the spine in order
         chapters.each do |file_id, title, chapter_content, original_id|
           # Process chapter content
-          processed_chapter = process_chapter_content(chapter_content, original_id)
+          processed_chapter = process_chapter_content(chapter_content, original_id, fragment_map)
 
           # Create unique IDs for chapter elements
-          chapter_id = "chapter-#{file_id}"
-          content_id = "content-#{file_id}"
-          title_id = "title-#{file_id}"
+          clean_id = "chapter-#{file_id}"
+          content_id = "content-#{clean_id}"
+          title_id = "title-#{clean_id}"
 
           # Create chapter XHTML
           chapter_html = <<~HTML
@@ -140,7 +161,7 @@ module ShapeUpDownloader
               <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
             </head>
             <body>
-              <div class="chapter" id="#{chapter_id}">
+              <div class="chapter" id="#{clean_id}">
                 <h1 id="#{title_id}">#{title}</h1>
                 <div class="chapter-content" id="#{content_id}">
                   #{processed_chapter}
@@ -151,7 +172,6 @@ module ShapeUpDownloader
           HTML
 
           # Add chapter to the book with cleaned ID
-          clean_id = file_id.gsub(/[^a-zA-Z0-9_-]/, '-')
           item = book.add_item("text/#{clean_id}.xhtml", id: clean_id)
           item.add_content(StringIO.new(chapter_html))
           item.add_property('svg')
@@ -226,7 +246,7 @@ module ShapeUpDownloader
         doc.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML)
       end
 
-      def self.process_chapter_content(chapter, original_id)
+      def self.process_chapter_content(chapter, original_id, fragment_map)
         # Create a Nokogiri fragment from the input
         doc = if chapter.is_a?(String)
           Nokogiri::HTML.fragment(chapter)
@@ -248,38 +268,125 @@ module ShapeUpDownloader
           title_elem.replace(h2)
         end
 
+        # First pass: Collect all existing IDs and headings
+        existing_ids = Set.new
+        doc.css("[id]").each do |elem|
+          clean_id = elem["id"].gsub(/[^a-zA-Z0-9_-]/, '-')
+          existing_ids.add(clean_id)
+          elem["id"] = clean_id
+        end
+
+        # Add IDs to all headings that don't have them
+        doc.css("h1, h2, h3, h4, h5, h6").each do |heading|
+          next if heading["id"]
+          clean_id = heading.text.strip.downcase.gsub(/[^a-zA-Z0-9]+/, '-')
+          clean_id = "heading-#{clean_id}" unless clean_id.match?(/^[a-zA-Z]/)
+          # Ensure uniqueness
+          base_id = clean_id
+          counter = 1
+          while existing_ids.include?(clean_id)
+            clean_id = "#{base_id}-#{counter}"
+            counter += 1
+          end
+          heading["id"] = clean_id
+          existing_ids.add(clean_id)
+        end
+
         # Process internal links
         doc.css("a[href]").each do |link|
           href = link["href"]
           next unless href
 
           if href.start_with?("#")
-            # Internal fragment link - prefix with current chapter
+            # Internal fragment link
             fragment = href[1..]
-            link["href"] = "##{fragment.gsub(/[^a-zA-Z0-9_-]/, '-')}"
+            clean_fragment = fragment.gsub(/[^a-zA-Z0-9_-]/, '-')
+            
+            # Check if this fragment exists in another chapter
+            if target_chapter = fragment_map[fragment]
+              if target_chapter != original_id
+                # Cross-chapter reference
+                clean_target = "chapter-#{target_chapter.gsub(/[^a-zA-Z0-9_-]/, '-')}"
+                link["href"] = "#{clean_target}.xhtml##{clean_fragment}"
+              else
+                # Same chapter reference
+                link["href"] = "##{clean_fragment}"
+              end
+            else
+              # Try to find or create a target for the fragment
+              target = doc.at_css("[id='#{clean_fragment}']")
+              unless target
+                # Look for text that matches the original fragment
+                text_nodes = doc.xpath(".//text()").select { |n| n.text.include?(fragment) }
+                if text_node = text_nodes.first
+                  # Create a span around the text
+                  span = Nokogiri::XML::Node.new("span", doc)
+                  span["id"] = clean_fragment
+                  text_node.wrap(span)
+                  existing_ids.add(clean_fragment)
+                else
+                  # If we can't find matching text, try to find a nearby heading or paragraph
+                  nearest = doc.at_css("h1, h2, h3, h4, h5, h6, p").tap do |elem|
+                    next unless elem
+                    elem["id"] = clean_fragment unless elem["id"]
+                    existing_ids.add(clean_fragment)
+                  end
+                end
+              end
+              link["href"] = "##{clean_fragment}"
+            end
           elsif href =~ /shapeup\/([0-9.]+(?:-(?:chapter|appendix)-\d+|conclusion))/
             # Convert shapeup/X.X-chapter-XX or shapeup/X.X-appendix-XX links
             target_id = $1
-            clean_id = target_id.gsub(/[^a-zA-Z0-9_-]/, '-')
+            clean_id = "chapter-#{target_id.gsub(/[^a-zA-Z0-9_-]/, '-')}"
             link["href"] = "#{clean_id}.xhtml"
           elsif href =~ /([0-9.]+(?:-(?:chapter|appendix)-\d+|conclusion))(?:\.xhtml)?(?:#(.+))?/
             # Handle direct chapter/appendix links
             target_id = $1
             fragment = $2
-            clean_id = target_id.gsub(/[^a-zA-Z0-9_-]/, '-')
+            clean_id = "chapter-#{target_id.gsub(/[^a-zA-Z0-9_-]/, '-')}"
             new_href = "#{clean_id}.xhtml"
             new_href += "##{fragment.gsub(/[^a-zA-Z0-9_-]/, '-')}" if fragment
             link["href"] = new_href
           elsif href =~ /#(.+)#(.+)/
             # Handle links with multiple hash fragments - use only the last one
             fragment = $2
-            link["href"] = "##{fragment.gsub(/[^a-zA-Z0-9_-]/, '-')}"
+            clean_fragment = fragment.gsub(/[^a-zA-Z0-9_-]/, '-')
+            
+            # Check if this fragment exists in another chapter
+            if target_chapter = fragment_map[fragment]
+              if target_chapter != original_id
+                # Cross-chapter reference
+                clean_target = "chapter-#{target_chapter.gsub(/[^a-zA-Z0-9_-]/, '-')}"
+                link["href"] = "#{clean_target}.xhtml##{clean_fragment}"
+              else
+                # Same chapter reference
+                link["href"] = "##{clean_fragment}"
+              end
+            else
+              # Try to find or create a target for the fragment
+              target = doc.at_css("[id='#{clean_fragment}']")
+              unless target
+                # Look for text that matches the original fragment
+                text_nodes = doc.xpath(".//text()").select { |n| n.text.include?(fragment) }
+                if text_node = text_nodes.first
+                  # Create a span around the text
+                  span = Nokogiri::XML::Node.new("span", doc)
+                  span["id"] = clean_fragment
+                  text_node.wrap(span)
+                  existing_ids.add(clean_fragment)
+                else
+                  # If we can't find matching text, try to find a nearby heading or paragraph
+                  nearest = doc.at_css("h1, h2, h3, h4, h5, h6, p").tap do |elem|
+                    next unless elem
+                    elem["id"] = clean_fragment unless elem["id"]
+                    existing_ids.add(clean_fragment)
+                  end
+                end
+              end
+              link["href"] = "##{clean_fragment}"
+            end
           end
-        end
-
-        # Clean up any remaining IDs in the content
-        doc.css("[id]").each do |elem|
-          elem["id"] = elem["id"].gsub(/[^a-zA-Z0-9_-]/, '-')
         end
 
         # Fix XHTML formatting for self-closing tags
