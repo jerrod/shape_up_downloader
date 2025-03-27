@@ -59,7 +59,7 @@ module ShapeUpDownloader
         chapters = doc.css(".chapter").map do |chapter|
           # Extract the original ID and clean it for file naming
           original_id = chapter['id']
-          file_id = original_id.gsub('.', '-')
+          file_id = original_id.gsub(/[^a-zA-Z0-9_-]/, '-')
           
           # Extract title
           title = if (title_elem = chapter.at_css(".chapter-title"))
@@ -124,6 +124,11 @@ module ShapeUpDownloader
           # Process chapter content
           processed_chapter = process_chapter_content(chapter_content, original_id)
 
+          # Create unique IDs for chapter elements
+          chapter_id = "chapter-#{file_id}"
+          content_id = "content-#{file_id}"
+          title_id = "title-#{file_id}"
+
           # Create chapter XHTML
           chapter_html = <<~HTML
             <?xml version="1.0" encoding="UTF-8"?>
@@ -135,15 +140,18 @@ module ShapeUpDownloader
               <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
             </head>
             <body>
-              <div class="chapter" id="#{original_id}">
-                #{processed_chapter}
+              <div class="chapter" id="#{chapter_id}">
+                <h1 id="#{title_id}">#{title}</h1>
+                <div class="chapter-content" id="#{content_id}">
+                  #{processed_chapter}
+                </div>
               </div>
             </body>
             </html>
           HTML
 
-          # Add chapter to the book
-          item = book.add_item("text/#{file_id}.xhtml", id: file_id)
+          # Add chapter to the book with cleaned ID
+          item = book.add_item("text/#{file_id}.xhtml", id: file_id.gsub(/[^a-zA-Z0-9_-]/, '-'))
           item.add_content(StringIO.new(chapter_html))
           item.add_property('svg')
           book.spine << item
@@ -213,64 +221,79 @@ module ShapeUpDownloader
           end
         end
 
-        # Update the chapter content with the processed images
-        chapter.inner_html = doc.to_html
-        chapter
+        # Return the chapter content with properly formatted images
+        doc.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML)
       end
 
       def self.process_chapter_content(chapter, original_id)
-        # Duplicate the chapter to avoid modifying the original
-        chapter = Nokogiri::HTML.fragment(chapter.to_html)
+        # Create a Nokogiri fragment from the input
+        doc = if chapter.is_a?(String)
+          Nokogiri::HTML.fragment(chapter)
+        else
+          Nokogiri::HTML.fragment(chapter.to_html)
+        end
 
         # Remove all style elements
-        chapter.css("style").remove
+        doc.css("style").remove
 
         # Remove navigation elements but keep all content
-        chapter.css(".intro__sections, .intro__masthead").remove
+        doc.css(".intro__sections, .intro__masthead").remove
 
         # Convert chapter titles to H2
-        chapter.css(".chapter-title").each do |title_elem|
-          h2 = Nokogiri::XML::Node.new("h2", chapter)
+        doc.css(".chapter-title").each do |title_elem|
+          h2 = Nokogiri::XML::Node.new("h2", doc)
           h2.content = title_elem.content
           h2["class"] = "chapter-title"
           title_elem.replace(h2)
         end
 
         # Process internal links
-        chapter.css("a[href]").each do |link|
+        doc.css("a[href]").each do |link|
           href = link["href"]
           next unless href
 
           if href.start_with?("#")
             # Internal fragment link - prefix with current chapter
-            link["href"] = "#{original_id}.xhtml#{href}"
+            fragment = href[1..]
+            link["href"] = "##{fragment.gsub(/[^a-zA-Z0-9_-]/, '-')}"
           elsif href =~ /shapeup\/([0-9.]+(?:-(?:chapter|appendix)-\d+|conclusion))/
             # Convert shapeup/X.X-chapter-XX or shapeup/X.X-appendix-XX links
             target_id = $1
-            link["href"] = "#{target_id.gsub('.', '-')}.xhtml"
+            clean_id = target_id.gsub(/[^a-zA-Z0-9_-]/, '-')
+            link["href"] = "#{clean_id}.xhtml"
           elsif href =~ /([0-9.]+(?:-(?:chapter|appendix)-\d+|conclusion))(?:\.xhtml)?(?:#(.+))?/
             # Handle direct chapter/appendix links
             target_id = $1
             fragment = $2
-            new_href = "#{target_id.gsub('.', '-')}.xhtml"
-            new_href += "##{fragment}" if fragment
+            clean_id = target_id.gsub(/[^a-zA-Z0-9_-]/, '-')
+            new_href = "#{clean_id}.xhtml"
+            new_href += "##{fragment.gsub(/[^a-zA-Z0-9_-]/, '-')}" if fragment
             link["href"] = new_href
+          elsif href =~ /#(.+)#(.+)/
+            # Handle links with multiple hash fragments - use only the last one
+            fragment = $2
+            link["href"] = "##{fragment.gsub(/[^a-zA-Z0-9_-]/, '-')}"
           end
         end
 
-        # Fix HTML issues
-        chapter.css("hr, br, img").each do |elem|
-          # Replace with self-closing tag
-          elem.replace(elem.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML))
+        # Clean up any remaining IDs in the content
+        doc.css("[id]").each do |elem|
+          elem["id"] = elem["id"].gsub(/[^a-zA-Z0-9_-]/, '-')
         end
 
-        # Remove any inline styles
-        chapter.css("[style]").each do |elem|
-          elem.remove_attribute("style")
+        # Fix XHTML formatting for self-closing tags
+        doc.css("img, hr, br").each do |elem|
+          # Create a new XML node with the same attributes
+          new_node = Nokogiri::XML::Node.new(elem.name, doc)
+          elem.attributes.each do |name, attr|
+            new_node[name] = attr.value
+          end
+          # Replace the old node with the properly formatted self-closing tag
+          elem.replace(new_node.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML))
         end
 
-        # Return the processed chapter content
-        chapter.to_html(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML)
+        # Return the processed chapter content with proper XHTML formatting
+        doc.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML)
       end
     end
   end
