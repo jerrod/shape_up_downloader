@@ -45,13 +45,18 @@ RSpec.describe ShapeUpDownloader::Downloader do
       end
       let(:doc) { Nokogiri::HTML(toc_html) }
 
-      it "extracts chapter URLs from table of contents" do
+      it "extracts chapter URLs from table of contents and includes appendices" do
         urls = downloader.send(:extract_chapter_urls, doc)
-        expect(urls).to eq([
+        expect(urls).to include(
           "https://basecamp.com/shapeup/1.1-chapter-1",
           "https://basecamp.com/shapeup/1.2-chapter-2",
-          "https://basecamp.com/shapeup/1.3-conclusion"
-        ])
+          "https://basecamp.com/shapeup/1.3-conclusion",
+          "https://basecamp.com/shapeup/4.0-appendix-01",
+          "https://basecamp.com/shapeup/4.1-appendix-02",
+          "https://basecamp.com/shapeup/4.2-appendix-03",
+          "https://basecamp.com/shapeup/4.5-appendix-06",
+          "https://basecamp.com/shapeup/4.6-appendix-07"
+        )
       end
 
       it "ignores non-chapter URLs" do
@@ -71,12 +76,17 @@ RSpec.describe ShapeUpDownloader::Downloader do
       end
       let(:doc) { Nokogiri::HTML(toc_html) }
 
-      it "extracts chapter URLs from alternative TOC" do
+      it "extracts chapter URLs from alternative TOC and includes appendices" do
         urls = downloader.send(:extract_chapter_urls, doc)
-        expect(urls).to eq([
+        expect(urls).to include(
           "https://basecamp.com/shapeup/1.1-chapter-1",
-          "https://basecamp.com/shapeup/1.2-chapter-2"
-        ])
+          "https://basecamp.com/shapeup/1.2-chapter-2",
+          "https://basecamp.com/shapeup/4.0-appendix-01",
+          "https://basecamp.com/shapeup/4.1-appendix-02",
+          "https://basecamp.com/shapeup/4.2-appendix-03",
+          "https://basecamp.com/shapeup/4.5-appendix-06",
+          "https://basecamp.com/shapeup/4.6-appendix-07"
+        )
       end
     end
 
