@@ -57,10 +57,10 @@ RSpec.describe ShapeUpDownloader::Utils::EPUBGenerator do
   describe ".add_table_of_contents" do
     let(:doc) do
       Nokogiri::HTML(<<~HTML)
-        <div class="chapter">
+        <div class="chapter" id="1.1-chapter-01">
           <div class="chapter-title">Chapter 1</div>
         </div>
-        <div class="chapter">
+        <div class="chapter" id="1.2-chapter-02">
           <div class="chapter-title">Chapter 2</div>
         </div>
       HTML
@@ -68,42 +68,79 @@ RSpec.describe ShapeUpDownloader::Utils::EPUBGenerator do
 
     it "adds table of contents to the book" do
       described_class.add_table_of_contents(book, doc)
-      expect(book.manifest.items.size).to eq(1)
-      expect(book.manifest.items.values.first.href).to eq("text/toc.xhtml")
-      expect(book.spine.itemref_list.size).to eq(1)
+      expect(book.manifest.items.size).to eq(3) # toc.xhtml, chapter-1-1-chapter-01.xhtml, chapter-1-2-chapter-02.xhtml
+      expect(book.manifest.items.values.map(&:href)).to include("text/toc.xhtml", "text/chapter-1-1-chapter-01.xhtml", "text/chapter-1-2-chapter-02.xhtml")
+      expect(book.spine.itemref_list.size).to eq(3)
     end
   end
 
-  describe ".add_chapter" do
+  describe ".process_chapter_content" do
     let(:chapter) do
       Nokogiri::HTML(<<~HTML)
-        <div class="chapter">
-          <nav>Navigation</nav>
+        <div class="chapter" id="1.1-chapter-01">
+          <div class="intro__masthead">
+            <nav>Navigation</nav>
+          </div>
           <div class="chapter-title">Test Chapter</div>
-          <div class="content">Test content</div>
+          <div class="chapter-content">Test content</div>
         </div>
       HTML
     end
-    let(:processed_images) { {} }
+    let(:original_id) { "1.1-chapter-01" }
+    let(:fragment_map) { {} }
+    let(:chapter_id_map) { { original_id => "chapter-1-1-chapter-01" } }
+    let(:section_to_chapter_map) { {} }
 
-    it "adds chapter to the book" do
-      described_class.add_chapter(book, chapter, 0, processed_images)
-      expect(book.manifest.items.size).to eq(1)
-      expect(book.manifest.items.values.first.href).to eq("text/chapter_01.xhtml")
-      expect(book.spine.itemref_list.size).to eq(1)
-    end
-
-    it "removes navigation elements" do
-      described_class.add_chapter(book, chapter, 0, processed_images)
-      expect(chapter.at_css("nav")).to be_nil
+    it "processes chapter content and removes navigation" do
+      result = described_class.process_chapter_content(chapter, original_id, fragment_map, chapter_id_map, section_to_chapter_map)
+      processed_doc = Nokogiri::HTML(result)
+      expect(processed_doc.at_css(".intro__masthead")).to be_nil
+      expect(processed_doc.at_css("nav")).to be_nil
+      expect(processed_doc.at_css(".chapter-content")).not_to be_nil
     end
 
     it "cleans up chapter title" do
-      described_class.add_chapter(book, chapter, 0, processed_images)
-      title = chapter.at_css("h1")
-      expect(title).not_to be_nil
-      expect(title.text).to eq("Test Chapter")
-      expect(title["class"]).to be_nil
+      result = described_class.process_chapter_content(chapter, original_id, fragment_map, chapter_id_map, section_to_chapter_map)
+      processed_doc = Nokogiri::HTML(result)
+      expect(processed_doc.at_css(".chapter-title")).to be_nil
+      expect(processed_doc.at_css(".chapter-content")).not_to be_nil
+    end
+
+    it "processes internal links correctly" do
+      chapter = Nokogiri::HTML(<<~HTML)
+        <div class="chapter" id="1.1-chapter-01">
+          <div class="chapter-title">Test Chapter</div>
+          <div class="content">
+            <p>Test content with <a href="#1.2-chapter-02">link to chapter 2</a></p>
+          </div>
+        </div>
+      HTML
+      chapter_id_map = {
+        "1.1-chapter-01" => "chapter-1-1-chapter-01",
+        "1.2-chapter-02" => "chapter-1-2-chapter-02"
+      }
+      
+      result = described_class.process_chapter_content(chapter, "1.1-chapter-01", {}, chapter_id_map, {})
+      processed_doc = Nokogiri::HTML(result)
+      link = processed_doc.at_css("a")
+      expect(link["href"]).to eq("chapter-1-2-chapter-02.xhtml")
+    end
+
+    it "processes section links correctly" do
+      chapter = Nokogiri::HTML(<<~HTML)
+        <div class="chapter" id="1.1-chapter-01">
+          <div class="chapter-title">Test Chapter</div>
+          <div class="content">
+            <p>Test content with <a href="#section">link to section</a></p>
+            <h2 id="section">Section Title</h2>
+          </div>
+        </div>
+      HTML
+      
+      result = described_class.process_chapter_content(chapter, "1.1-chapter-01", {}, { "1.1-chapter-01" => "chapter-1-1-chapter-01" }, {})
+      processed_doc = Nokogiri::HTML(result)
+      link = processed_doc.at_css("a")
+      expect(link["href"]).to eq("#section")
     end
   end
 end

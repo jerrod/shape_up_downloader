@@ -1,17 +1,32 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env ruby
+# frozen_string_literal: true
 
-# Source the user's zsh profile
-source ~/.zshrc
+require 'rbconfig'
+require 'fileutils'
 
 # Change to the script's directory
-cd "$(dirname "$0")/.."
+Dir.chdir(File.expand_path('..', __dir__))
 
-rm -rf dist
-mkdir -p dist
+# Clean and create dist directory
+FileUtils.rm_rf('dist')
+FileUtils.mkdir_p('dist')
 
 # Run the commands
-bundle exec ruby bin/shape_up_downloader download_single_html
-bundle exec ruby bin/shape_up_downloader convert_to_epub
-bundle exec ruby bin/shape_up_downloader validate_epub
+system('bundle exec ruby bin/shape_up_downloader download_single_html') or exit(1)
+system('bundle exec ruby bin/shape_up_downloader convert_to_epub') or exit(1)
+system('bundle exec ruby bin/shape_up_downloader validate_epub') or exit(1)
 
-open ./dist/shape_up.epub
+# Get absolute paths to generated files
+html_path = File.expand_path('dist/shape-up.html')
+epub_path = File.expand_path('dist/shape_up.epub')
+
+# Open files on macOS, otherwise display paths
+if RbConfig::CONFIG['host_os'] =~ /darwin/
+  system("open #{html_path}")
+  system("open #{epub_path}")
+else
+  puts "\nGenerated files:"
+  puts "HTML: #{html_path}"
+  puts "EPUB: #{epub_path}"
+  puts "\nPlease open these files with your preferred reader."
+end
