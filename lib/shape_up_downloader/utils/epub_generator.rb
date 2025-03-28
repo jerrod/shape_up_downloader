@@ -10,6 +10,10 @@ module ShapeUpDownloader
     class EPUBGenerator
       include ShapeUpDownloader::Constants
 
+      def self.normalize_text(text)
+        text.strip.gsub(/\s+/, ' ').downcase
+      end
+
       def self.create_book
         book = GEPUB::Book.new
         book.primary_identifier("https://basecamp.com/shapeup")
@@ -59,6 +63,7 @@ module ShapeUpDownloader
         processed_images = {}
         fragment_map = {}
         chapter_id_map = {}
+        section_to_chapter_map = {}
         
         # First pass: collect all fragments from all chapters and create chapter ID mapping
         doc.css(".chapter").each do |chapter|
@@ -72,6 +77,12 @@ module ShapeUpDownloader
           if title_elem = chapter.at_css(".chapter-title")
             title_id = title_elem.text.strip.downcase.gsub(/[^a-zA-Z0-9]+/, '-')
             fragment_map[title_id] = original_id
+          end
+
+          # Map section titles to their chapters
+          chapter.css("h1, h2, h3, h4, h5, h6").each do |heading|
+            section_title = normalize_text(heading.text)
+            section_to_chapter_map[section_title] = original_id
           end
           
           # Add all existing IDs to fragment map
@@ -95,7 +106,7 @@ module ShapeUpDownloader
           original_id = chapter['id']
           file_id = original_id.gsub(/[^a-zA-Z0-9_-]/, '-')
           
-          # Extract title
+          # Extract title and chapter number
           title = if (title_elem = chapter.at_css(".chapter-title"))
             title_elem.text.strip
           else
@@ -123,10 +134,22 @@ module ShapeUpDownloader
             end
           end
 
+          # Extract chapter number for display
+          chapter_display = case original_id
+          when /conclusion/
+            nil
+          when /4\.\d+-appendix-\d+/
+            nil
+          else
+            if match = original_id.match(/\d+\.\d+-chapter-(\d+)/)
+              "Chapter #{match[1]}"
+            end
+          end
+
           # Process images in the chapter
           processed_chapter = process_images_in_chapter(chapter, book, processed_images)
 
-          [file_id, title, processed_chapter, original_id]
+          [file_id, title, processed_chapter, original_id, chapter_display]
         end
 
         # Sort chapters by their position in the document
@@ -160,9 +183,9 @@ module ShapeUpDownloader
         book.spine << toc_item
 
         # Add chapters to the spine in order
-        chapters.each do |file_id, title, chapter_content, original_id|
-          # Process chapter content with the chapter ID mapping
-          processed_chapter = process_chapter_content(chapter_content, original_id, fragment_map, chapter_id_map)
+        chapters.each do |file_id, title, chapter_content, original_id, chapter_display|
+          # Process chapter content with the chapter ID mapping and section mapping
+          processed_chapter = process_chapter_content(chapter_content, original_id, fragment_map, chapter_id_map, section_to_chapter_map)
 
           # Create unique IDs for chapter elements
           clean_id = chapter_id_map[original_id]
@@ -181,6 +204,7 @@ module ShapeUpDownloader
             </head>
             <body>
               <div class="chapter" id="#{clean_id}">
+                #{chapter_display ? "<div class='chapter-number'>#{chapter_display}</div>" : ""}
                 <h1 id="#{title_id}">#{title}</h1>
                 <div class="chapter-content" id="#{content_id}">
                   #{processed_chapter}
@@ -265,7 +289,7 @@ module ShapeUpDownloader
         doc.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XHTML)
       end
 
-      def self.process_chapter_content(chapter, original_id, fragment_map, chapter_id_map)
+      def self.process_chapter_content(chapter, original_id, fragment_map, chapter_id_map, section_to_chapter_map)
         # Create a Nokogiri fragment from the input
         doc = if chapter.is_a?(String)
           Nokogiri::HTML.fragment(chapter)
@@ -279,13 +303,8 @@ module ShapeUpDownloader
         # Remove navigation elements but keep all content
         doc.css(".intro__sections, .intro__masthead").remove
 
-        # Convert chapter titles to H2
-        doc.css(".chapter-title").each do |title_elem|
-          h2 = Nokogiri::XML::Node.new("h2", doc)
-          h2.content = title_elem.content
-          h2["class"] = "chapter-title"
-          title_elem.replace(h2)
-        end
+        # Remove the original chapter title since we'll add it at the top level
+        doc.css(".chapter-title").remove
 
         # First pass: Collect all existing IDs and headings
         existing_ids = Set.new
@@ -328,20 +347,32 @@ module ShapeUpDownloader
           existing_ids.add(clean_id)
         end
 
-        # Helper method to normalize text for comparison
-        def self.normalize_text(text)
-          text.strip.gsub(/\s+/, ' ').downcase
-        end
-
         # Process internal links
         doc.css("a[href]").each do |link|
           href = link["href"]
           next unless href
 
           if href.start_with?("#")
+            # Check if it's a direct chapter reference (e.g., #1.2-chapter-03)
+            if href =~ /#(\d+\.\d+-(?:chapter|appendix)-\d+|conclusion)/
+              target_id = $1
+              clean_target = chapter_id_map[target_id]
+              link["href"] = "#{clean_target}.xhtml"
+              next
+            end
+
             # Internal fragment link
             fragment = href[1..]
             clean_fragment = fragment.gsub(/[^a-zA-Z0-9_-]/, '-')
+            
+            # First check if the link text matches a known section title
+            link_text = normalize_text(link.text)
+            if target_chapter = section_to_chapter_map[link_text]
+              # If it matches a section title, link directly to that chapter
+              clean_target = chapter_id_map[target_chapter]
+              link["href"] = "#{clean_target}.xhtml"
+              next
+            end
             
             # Check if this fragment exists in another chapter
             if target_chapter = fragment_map[fragment]

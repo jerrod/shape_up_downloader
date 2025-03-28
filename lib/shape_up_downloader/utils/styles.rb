@@ -13,19 +13,30 @@ module ShapeUpDownloader
           margin: 0 auto;
         }
 
+        .chapter-number {
+          margin: 0.25em 0 0;
+          font-weight: 500;
+          padding: 0;
+
+        }
+        .glossary__entry-title {
+        font-size: 1rem;
+        font-weight: 600;
+        }
+
         /* Chapter titles */
         h1 {
-          font-size: 2.5em;
+          font-size: 2.0em;
           font-weight: 700;
-          margin: 1.5em 0 1em;
-          line-height: 1.2;
+          margin: 0 0 0.5em;
+          line-height: 1.0;
         }
 
         /* Chapter titles (h2) */
         h2.chapter-title {
-          font-size: 2.2em;
+          font-size: 2.0em;
           font-weight: 700;
-          margin: 1.5em 0 1em;
+          margin: 0.25em 0 0.5em;
           line-height: 1.2;
           text-align: left;
           color: #000;
@@ -33,7 +44,7 @@ module ShapeUpDownloader
 
         /* Regular h2 (not chapter titles) */
         h2:not(.chapter-title) {
-          font-size: 1.5em;
+          font-size: 1.4em;
           font-weight: 600;
           margin: 1.5em 0 0.5em;
           line-height: 1.3;
