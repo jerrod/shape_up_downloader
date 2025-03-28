@@ -43,9 +43,13 @@ RSpec.describe ShapeUpDownloader::CLI do
       before do
         FileUtils.mkdir_p(dist_dir)
         File.write(html_file, <<~HTML)
-          <div class="chapter">
+          <div class="chapter" id="chapter-1">
             <div class="chapter-title">Test Chapter</div>
             <div class="content">Test content</div>
+          </div>
+          <div class="chapter" id="chapter-2">
+            <div class="chapter-title">Another Chapter</div>
+            <div class="content">More test content</div>
           </div>
         HTML
       end
@@ -77,9 +81,13 @@ RSpec.describe ShapeUpDownloader::CLI do
       before do
         FileUtils.mkdir_p(dist_dir)
         File.write(html_file, <<~HTML)
-          <div class="chapter">
+          <div class="chapter" id="chapter-1">
             <div class="chapter-title">Test Chapter</div>
             <div class="content">Test content</div>
+          </div>
+          <div class="chapter" id="chapter-2">
+            <div class="chapter-title">Another Chapter</div>
+            <div class="content">More test content</div>
           </div>
         HTML
         cli.invoke(:convert_to_epub)
@@ -114,9 +122,13 @@ RSpec.describe ShapeUpDownloader::CLI do
       before do
         FileUtils.mkdir_p(dist_dir)
         File.write(html_file, <<~HTML)
-          <div class="chapter">
+          <div class="chapter" id="chapter-1">
             <div class="chapter-title">Test Chapter</div>
             <div class="content">Test content</div>
+          </div>
+          <div class="chapter" id="chapter-2">
+            <div class="chapter-title">Another Chapter</div>
+            <div class="content">More test content</div>
           </div>
         HTML
         cli.invoke(:convert_to_epub)
